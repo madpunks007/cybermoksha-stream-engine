@@ -37,7 +37,7 @@ jobs:
           esac
           
           echo "SELECTED_VIDEO=$VIDEO" >> $GITHUB_ENV
-
+          wget -q https://github.com/madpunks007/cybermoksha-stream-engine/releases/download/v1.0/$VIDEO
       - name: Broadcast to YouTube Live
         env:
           YOUTUBE_STREAM_KEY: ${{ secrets.YOUTUBE_STREAM_KEY }}
