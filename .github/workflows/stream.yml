@@ -1,16 +1,19 @@
 name: 24/7 CYBERMOKSHA Live Stream Engine
 
 on:
-  workflow_dispatch: # Allows 1-click start/stop from your phone
+  workflow_dispatch:
   schedule:
-    # Auto-rotates every 5 hours to stay live 24/7 and bank watch hours
-    - cron: '0 */5 * * *'
+    - cron: '0 */6 * * *'
+
+concurrency:
+  group: cybermoksha-live-stream
+  cancel-in-progress: true
 
 jobs:
   stream:
     runs-on: ubuntu-latest
-    timeout-minutes: 340
-    
+    timeout-minutes: 355
+
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -22,10 +25,9 @@ jobs:
 
       - name: Select Daily Master Video
         run: |
-          # 1=Mon, 2=Tue, 3=Wed, 4=Thu, 5=Fri, 6=Sat, 7=Sun
           DAY_NUM=$(date +%u)
           echo "[+] Today is Day of Week: $DAY_NUM"
-          
+
           case $DAY_NUM in
             1) VIDEO="CyberMoksha_SacredTemple_Devotional_Master_10Min.mp4" ;;
             2) VIDEO="CyberMoksha_Day2_Tuesday_CozyCabin_Master_10Min.mp4" ;;
@@ -35,9 +37,12 @@ jobs:
             6) VIDEO="CyberMoksha_Day6_Saturday_AutumnLibrary_Master_10Min.mp4" ;;
             7) VIDEO="CyberMoksha_Day7_Sunday_ZenGarden_Master_10Min.mp4" ;;
           esac
-          
+
           echo "SELECTED_VIDEO=$VIDEO" >> $GITHUB_ENV
-          wget -q https://github.com/madpunks007/cybermoksha-stream-engine/releases/download/v1.0/$VIDEO
+          DOMAIN="github.com"
+          REPO="madpunks007/cybermoksha-stream-engine"
+          wget -q "https://${DOMAIN}/${REPO}/releases/download/v1.0/${VIDEO}"
+
       - name: Broadcast to YouTube Live
         env:
           YOUTUBE_STREAM_KEY: ${{ secrets.YOUTUBE_STREAM_KEY }}
@@ -46,9 +51,10 @@ jobs:
             echo "[-] ERROR: YOUTUBE_STREAM_KEY secret is not set!"
             exit 1
           fi
-          
+
           echo "[+] Broadcasting to YouTube Live 24/7..."
+          HOST="a.rtmp.youtube.com"
           ffmpeg -re -stream_loop -1 -i "$SELECTED_VIDEO" \
             -c:v copy -c:a copy \
-            -t 05:30:00 \
-            -f flv "rtmp://a.rtmp.youtube.com/live2/${YOUTUBE_STREAM_KEY}"
+            -t 05:45:00 \
+            -f flv "rtmp://${HOST}/live2/${YOUTUBE_STREAM_KEY}"
