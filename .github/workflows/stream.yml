@@ -55,6 +55,6 @@ jobs:
           echo "[+] Broadcasting to YouTube Live 24/7..."
           HOST="a.rtmp.youtube.com"
           ffmpeg -re -stream_loop -1 -i "$SELECTED_VIDEO" \
-            -c:v copy -c:a copy \
+            -c:v copy -c:a aac -b:a 192k -ar 44100 -ac 2 -af "pan=stereo|c0=c0|c1=c0,stereotools=slev=1.4" \
             -t 05:45:00 \
             -f flv "rtmp://${HOST}/live2/${YOUTUBE_STREAM_KEY}"
