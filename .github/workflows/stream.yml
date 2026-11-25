@@ -2,6 +2,16 @@ name: 24/7 CYBERMOKSHA Live Stream Engine
 
 on:
   workflow_dispatch:
+    inputs:
+      stream_mode:
+        description: 'Broadcast Selection'
+        required: true
+        default: 'week2_full_70min'
+        type: choice
+        options:
+          - 'week2_full_70min'
+          - 'week2_daily'
+          - 'week1_daily'
 
 concurrency:
   group: cybermoksha-live-stream
@@ -21,25 +31,51 @@ jobs:
           sudo apt update -y
           sudo apt install -y ffmpeg
 
-      - name: Select Daily Master Video
+      - name: Select and Download Master Video
         run: |
+          MODE="${{ github.event.inputs.stream_mode || 'week2_full_70min' }}"
           DAY_NUM=$(date +%u)
+          echo "[+] Selected Stream Mode: $MODE"
           echo "[+] Today is Day of Week: $DAY_NUM"
 
-          case $DAY_NUM in
-            1) VIDEO="CyberMoksha_SacredTemple_Devotional_Master_10Min.mp4" ;;
-            2) VIDEO="CyberMoksha_Day2_Tuesday_CozyCabin_Master_10Min.mp4" ;;
-            3) VIDEO="CyberMoksha_Day3_Wednesday_Varanasi_Master_10Min.mp4" ;;
-            4) VIDEO="CyberMoksha_Day4_Thursday_RainyLoft_Master_10Min.mp4" ;;
-            5) VIDEO="CyberMoksha_Day5_Friday_Himalayan_Master_10Min.mp4" ;;
-            6) VIDEO="CyberMoksha_Day6_Saturday_AutumnLibrary_Master_10Min.mp4" ;;
-            7) VIDEO="CyberMoksha_Day7_Sunday_ZenGarden_Master_10Min.mp4" ;;
-          esac
-
-          echo "SELECTED_VIDEO=$VIDEO" >> $GITHUB_ENV
           DOMAIN="github.com"
           REPO="madpunks007/cybermoksha-stream-engine"
-          wget -q "https://${DOMAIN}/${REPO}/releases/download/v1.0/${VIDEO}"
+
+          if [ "$MODE" = "week2_full_70min" ]; then
+            VIDEO="Master_Week2_Full7Days_70Min.mp4"
+            RELEASE_TAG="v2.0"
+          elif [ "$MODE" = "week2_daily" ]; then
+            RELEASE_TAG="v2.0"
+            case $DAY_NUM in
+              1) VIDEO="Master_W2_Day1_Mon_NeonTokyo.mp4" ;;
+              2) VIDEO="Master_W2_Day2_Tue_DeepSpace.mp4" ;;
+              3) VIDEO="Master_W2_Day3_Wed_SynthHighway.mp4" ;;
+              4) VIDEO="Master_W2_Day4_Thu_OrbitalStation.mp4" ;;
+              5) VIDEO="Master_W2_Day5_Fri_UnderwaterDome.mp4" ;;
+              6) VIDEO="Master_W2_Day6_Sat_CyberZen.mp4" ;;
+              7) VIDEO="Master_W2_Day7_Sun_AstralHorizon.mp4" ;;
+            esac
+          else
+            RELEASE_TAG="v1.0"
+            case $DAY_NUM in
+              1) VIDEO="CyberMoksha_SacredTemple_Devotional_Master_10Min.mp4" ;;
+              2) VIDEO="CyberMoksha_Day2_Tuesday_CozyCabin_Master_10Min.mp4" ;;
+              3) VIDEO="CyberMoksha_Day3_Wednesday_Varanasi_Master_10Min.mp4" ;;
+              4) VIDEO="CyberMoksha_Day4_Thursday_RainyLoft_Master_10Min.mp4" ;;
+              5) VIDEO="CyberMoksha_Day5_Friday_Himalayan_Master_10Min.mp4" ;;
+              6) VIDEO="CyberMoksha_Day6_Saturday_AutumnLibrary_Master_10Min.mp4" ;;
+              7) VIDEO="CyberMoksha_Day7_Sunday_ZenGarden_Master_10Min.mp4" ;;
+            esac
+          fi
+
+          echo "SELECTED_VIDEO=$VIDEO" >> $GITHUB_ENV
+          echo "[+] Fetching $VIDEO from release $RELEASE_TAG..."
+          wget -q --show-progress "https://${DOMAIN}/${REPO}/releases/download/${RELEASE_TAG}/${VIDEO}"
+
+          if [ ! -f "$VIDEO" ]; then
+            echo "[-] Failed to download $VIDEO! Falling back to v1.0 release asset..."
+            wget -q --show-progress "https://${DOMAIN}/${REPO}/releases/download/v1.0/CyberMoksha_Day2_Tuesday_CozyCabin_Master_10Min.mp4" -O "$VIDEO"
+          fi
 
       - name: Broadcast to YouTube Live
         env:
@@ -53,9 +89,9 @@ jobs:
           echo "[+] Broadcasting to YouTube Live 24/7..."
           HOST="a.rtmp.youtube.com"
           ffmpeg -fflags +genpts -re -stream_loop -1 -i "$SELECTED_VIDEO" \
-            -c:v copy -c:a aac -b:a 192k -ar 44100 -ac 2 -af "pan=stereo|c0=c0|c1=c0,stereotools=slev=1.4" \
+            -c:v copy -c:a aac -b:a 192k -ar 44100 -ac 2 \
             -t 20640 \
-            -f flv "rtmp://${HOST}/live2/${YOUTUBE_STREAM_KEY}"
+            -flvflags no_duration_filesize -f flv "rtmp://${HOST}/live2/${YOUTUBE_STREAM_KEY}"
 
       - name: Auto-Restart Stream Relay (Self-Chaining)
         if: always()
