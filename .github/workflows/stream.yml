@@ -13,10 +13,6 @@ on:
           - 'week2_full_70min'
           - 'week1_daily'
 
-concurrency:
-  group: cybermoksha-live-stream
-  cancel-in-progress: false
-
 jobs:
   stream:
     runs-on: ubuntu-latest
@@ -26,10 +22,10 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Install FFmpeg
+      - name: Verify FFmpeg
         run: |
-          sudo apt update -y
-          sudo apt install -y ffmpeg
+          which ffmpeg || (sudo apt update -y && sudo apt install -y ffmpeg)
+          ffmpeg -version | head -n 1
 
       - name: Select and Download Master Video (Autonomous Day-of-Week)
         run: |
@@ -80,25 +76,46 @@ jobs:
       - name: Broadcast to YouTube Live
         env:
           YOUTUBE_STREAM_KEY: ${{ secrets.YOUTUBE_STREAM_KEY }}
+          GH_PAT: ${{ secrets.GH_PAT }}
         run: |
           if [ -z "$YOUTUBE_STREAM_KEY" ]; then
             echo "[-] ERROR: YOUTUBE_STREAM_KEY secret is not set!"
             exit 1
           fi
 
-          echo "[+] Broadcasting $SELECTED_VIDEO to YouTube Live 24/7..."
+          STREAM_DURATION=20640
+
+          # Pre-dispatch next relay 45 seconds before this FFmpeg finishes
+          # This completely eliminates runner boot gaps by overlapping the startup!
+          (
+            sleep $((STREAM_DURATION - 45))
+            echo "[+] 45s remaining: Pre-dispatching next 24/7 stream relay..."
+            curl -s -f -X POST \
+              -H "Accept: application/vnd.github+json" \
+              -H "Authorization: Bearer ${GH_PAT}" \
+              "https://api.github.com/repos/madpunks007/cybermoksha-stream-engine/actions/workflows/stream.yml/dispatches" \
+              -d '{"ref":"main"}' && touch /tmp/dispatched_early || true
+          ) &
+
+          echo "[+] Broadcasting $SELECTED_VIDEO to YouTube Live 24/7 for ${STREAM_DURATION}s (~5h 44m)..."
           HOST="a.rtmp.youtube.com"
           ffmpeg -fflags +genpts -re -stream_loop -1 -i "$SELECTED_VIDEO" \
             -c:v copy -c:a aac -b:a 192k -ar 44100 -ac 2 \
-            -t 20640 \
+            -t "$STREAM_DURATION" \
             -flvflags no_duration_filesize -f flv "rtmp://${HOST}/live2/${YOUTUBE_STREAM_KEY}"
 
-      - name: Auto-Restart Stream Relay (Self-Chaining)
+      - name: Fallback Auto-Restart Stream Relay
         if: always()
+        env:
+          GH_PAT: ${{ secrets.GH_PAT }}
         run: |
-          echo "[+] Triggering next 24/7 stream run via GitHub Actions REST API..."
-          curl -s -f -X POST \
-            -H "Accept: application/vnd.github+json" \
-            -H "Authorization: Bearer ${{ secrets.GH_PAT }}" \
-            "https://api.github.com/repos/madpunks007/cybermoksha-stream-engine/actions/workflows/stream.yml/dispatches" \
-            -d '{"ref":"main"}'
+          if [ ! -f /tmp/dispatched_early ]; then
+            echo "[+] Fallback: Triggering next 24/7 stream run via GitHub Actions REST API..."
+            curl -s -f -X POST \
+              -H "Accept: application/vnd.github+json" \
+              -H "Authorization: Bearer ${GH_PAT}" \
+              "https://api.github.com/repos/madpunks007/cybermoksha-stream-engine/actions/workflows/stream.yml/dispatches" \
+              -d '{"ref":"main"}'
+          else
+            echo "[+] Next relay already pre-dispatched with zero gap handover."
+          fi
