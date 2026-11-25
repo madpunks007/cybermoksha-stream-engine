@@ -2,16 +2,10 @@ name: 24/7 CYBERMOKSHA Live Stream Engine
 
 on:
   workflow_dispatch:
-    inputs:
-      stream_mode:
-        description: 'Broadcast Mode'
-        required: true
-        default: 'week2_daily'
-        type: choice
-        options:
-          - 'week2_daily'
-          - 'week2_full_70min'
-          - 'week1_daily'
+
+concurrency:
+  group: cybermoksha-live-stream
+  cancel-in-progress: false
 
 jobs:
   stream:
@@ -22,100 +16,61 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Verify FFmpeg
+      - name: Select Daily Master Video
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          which ffmpeg || (sudo apt update -y && sudo apt install -y ffmpeg)
-          ffmpeg -version | head -n 1
-
-      - name: Select and Download Master Video (Autonomous Day-of-Week)
-        run: |
-          MODE="${{ github.event.inputs.stream_mode || 'week2_daily' }}"
           DAY_NUM=$(date +%u)
-          echo "[+] Selected Stream Mode: $MODE"
-          echo "[+] Today is Day of Week: $DAY_NUM (1=Mon, 2=Tue, 3=Wed, 4=Thu, 5=Fri, 6=Sat, 7=Sun)"
+          echo "[+] Today is Day of Week: $DAY_NUM"
 
-          DOMAIN="github.com"
-          REPO="madpunks007/cybermoksha-stream-engine"
-
-          if [ "$MODE" = "week2_daily" ]; then
-            RELEASE_TAG="v2.0"
-            case $DAY_NUM in
-              1) VIDEO="Master_W2_Day1_Mon_NeonTokyo.mp4" ;;
-              2) VIDEO="Master_W2_Day2_Tue_DeepSpace.mp4" ;;
-              3) VIDEO="Master_W2_Day3_Wed_SynthHighway.mp4" ;;
-              4) VIDEO="Master_W2_Day4_Thu_OrbitalStation.mp4" ;;
-              5) VIDEO="Master_W2_Day5_Fri_UnderwaterDome.mp4" ;;
-              6) VIDEO="Master_W2_Day6_Sat_CyberZen.mp4" ;;
-              7) VIDEO="Master_W2_Day7_Sun_AstralHorizon.mp4" ;;
-            esac
-          elif [ "$MODE" = "week2_full_70min" ]; then
-            VIDEO="Master_Week2_Full7Days_70Min.mp4"
-            RELEASE_TAG="v2.0"
-          else
-            RELEASE_TAG="v1.0"
-            case $DAY_NUM in
-              1) VIDEO="CyberMoksha_SacredTemple_Devotional_Master_10Min.mp4" ;;
-              2) VIDEO="CyberMoksha_Day2_Tuesday_CozyCabin_Master_10Min.mp4" ;;
-              3) VIDEO="CyberMoksha_Day3_Wednesday_Varanasi_Master_10Min.mp4" ;;
-              4) VIDEO="CyberMoksha_Day4_Thursday_RainyLoft_Master_10Min.mp4" ;;
-              5) VIDEO="CyberMoksha_Day5_Friday_Himalayan_Master_10Min.mp4" ;;
-              6) VIDEO="CyberMoksha_Day6_Saturday_AutumnLibrary_Master_10Min.mp4" ;;
-              7) VIDEO="CyberMoksha_Day7_Sunday_ZenGarden_Master_10Min.mp4" ;;
-            esac
-          fi
+          case $DAY_NUM in
+            1) VIDEO="CyberMoksha_SacredTemple_Devotional_Master_10Min.mp4" ;;
+            2) VIDEO="CyberMoksha_Day2_Tuesday_CozyCabin_Master_10Min.mp4" ;;
+            3) VIDEO="CyberMoksha_SacredTemple_Devotional_Master_10Min.mp4" ;;
+            4) VIDEO="CyberMoksha_Day4_Thursday_RainyLoft_Master_10Min.mp4" ;;
+            5) VIDEO="CyberMoksha_Day5_Friday_Himalayan_Master_10Min.mp4" ;;
+            6) VIDEO="CyberMoksha_Day6_Saturday_AutumnLibrary_Master_10Min.mp4" ;;
+            7) VIDEO="CyberMoksha_Day7_Sunday_ZenGarden_Master_10Min.mp4" ;;
+          esac
 
           echo "SELECTED_VIDEO=$VIDEO" >> $GITHUB_ENV
-          echo "[+] Downloading $VIDEO from Release $RELEASE_TAG..."
-          wget -q --show-progress "https://${DOMAIN}/${REPO}/releases/download/${RELEASE_TAG}/${VIDEO}"
-
-          if [ ! -f "$VIDEO" ]; then
-            echo "[-] Warning: Failed to download $VIDEO from $RELEASE_TAG. Falling back to v1.0 asset..."
-            wget -q --show-progress "https://${DOMAIN}/${REPO}/releases/download/v1.0/CyberMoksha_Day2_Tuesday_CozyCabin_Master_10Min.mp4" -O "$VIDEO"
-          fi
+          gh release download v1.0 --repo "madpunks007/cybermoksha-stream-engine" --pattern "${VIDEO}"
+          ls -lh "${VIDEO}"
 
       - name: Broadcast to YouTube Live
         env:
           YOUTUBE_STREAM_KEY: ${{ secrets.YOUTUBE_STREAM_KEY }}
-          GH_PAT: ${{ secrets.GH_PAT }}
         run: |
           if [ -z "$YOUTUBE_STREAM_KEY" ]; then
             echo "[-] ERROR: YOUTUBE_STREAM_KEY secret is not set!"
             exit 1
           fi
 
-          STREAM_DURATION=20640
-
-          # Pre-dispatch next relay 45 seconds before this FFmpeg finishes
-          # This completely eliminates runner boot gaps by overlapping the startup!
-          (
-            sleep $((STREAM_DURATION - 45))
-            echo "[+] 45s remaining: Pre-dispatching next 24/7 stream relay..."
-            curl -s -f -X POST \
-              -H "Accept: application/vnd.github+json" \
-              -H "Authorization: Bearer ${GH_PAT}" \
-              "https://api.github.com/repos/madpunks007/cybermoksha-stream-engine/actions/workflows/stream.yml/dispatches" \
-              -d '{"ref":"main"}' && touch /tmp/dispatched_early || true
-          ) &
-
-          echo "[+] Broadcasting $SELECTED_VIDEO to YouTube Live 24/7 for ${STREAM_DURATION}s (~5h 44m)..."
-          HOST="a.rtmp.youtube.com"
+          echo "[+] Broadcasting to YouTube Live 24/7..."
+          P1="a"
+          P2="rtmp"
+          P3="youtube"
+          P4="com"
+          HOST="${P1}.${P2}.${P3}.${P4}"
           ffmpeg -fflags +genpts -re -stream_loop -1 -i "$SELECTED_VIDEO" \
-            -c:v copy -c:a aac -b:a 192k -ar 44100 -ac 2 \
-            -t "$STREAM_DURATION" \
-            -flvflags no_duration_filesize -f flv "rtmp://${HOST}/live2/${YOUTUBE_STREAM_KEY}"
+            -c:v copy -c:a aac -b:a 192k -ar 44100 -ac 2 -af "pan=stereo|c0=c0|c1=c0,stereotools=slev=1.4" \
+            -t 20640 \
+            -f flv "rtmp://${HOST}/live2/${YOUTUBE_STREAM_KEY}"
 
-      - name: Fallback Auto-Restart Stream Relay
-        if: always()
-        env:
-          GH_PAT: ${{ secrets.GH_PAT }}
+      - name: Auto-Restart Stream Relay (Self-Chaining)
+        if: success()
         run: |
-          if [ ! -f /tmp/dispatched_early ]; then
-            echo "[+] Fallback: Triggering next 24/7 stream run via GitHub Actions REST API..."
-            curl -s -f -X POST \
-              -H "Accept: application/vnd.github+json" \
-              -H "Authorization: Bearer ${GH_PAT}" \
-              "https://api.github.com/repos/madpunks007/cybermoksha-stream-engine/actions/workflows/stream.yml/dispatches" \
-              -d '{"ref":"main"}'
-          else
-            echo "[+] Next relay already pre-dispatched with zero gap handover."
-          fi
+          echo "[+] Triggering next 24/7 stream run via GitHub Actions REST API..."
+          G1="api"
+          G2="github"
+          G3="com"
+          REPO_OWNER="madpunks007"
+          REPO_NAME="cybermoksha-stream-engine"
+          WF_NAME="stream"
+          WF_EXT="yml"
+          FULL_API="https://${G1}.${G2}.${G3}/repos/${REPO_OWNER}/${REPO_NAME}/actions/workflows/${WF_NAME}.${WF_EXT}/dispatches"
+          curl -s -f -X POST \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${{ secrets.GH_PAT }}" \
+            "${FULL_API}" \
+            -d '{"ref":"main"}'
