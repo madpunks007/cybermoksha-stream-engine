@@ -4,13 +4,13 @@ on:
   workflow_dispatch:
     inputs:
       stream_mode:
-        description: 'Broadcast Selection'
+        description: 'Broadcast Mode'
         required: true
-        default: 'week2_full_70min'
+        default: 'week2_daily'
         type: choice
         options:
-          - 'week2_full_70min'
           - 'week2_daily'
+          - 'week2_full_70min'
           - 'week1_daily'
 
 concurrency:
@@ -31,20 +31,17 @@ jobs:
           sudo apt update -y
           sudo apt install -y ffmpeg
 
-      - name: Select and Download Master Video
+      - name: Select and Download Master Video (Autonomous Day-of-Week)
         run: |
-          MODE="${{ github.event.inputs.stream_mode || 'week2_full_70min' }}"
+          MODE="${{ github.event.inputs.stream_mode || 'week2_daily' }}"
           DAY_NUM=$(date +%u)
           echo "[+] Selected Stream Mode: $MODE"
-          echo "[+] Today is Day of Week: $DAY_NUM"
+          echo "[+] Today is Day of Week: $DAY_NUM (1=Mon, 2=Tue, 3=Wed, 4=Thu, 5=Fri, 6=Sat, 7=Sun)"
 
           DOMAIN="github.com"
           REPO="madpunks007/cybermoksha-stream-engine"
 
-          if [ "$MODE" = "week2_full_70min" ]; then
-            VIDEO="Master_Week2_Full7Days_70Min.mp4"
-            RELEASE_TAG="v2.0"
-          elif [ "$MODE" = "week2_daily" ]; then
+          if [ "$MODE" = "week2_daily" ]; then
             RELEASE_TAG="v2.0"
             case $DAY_NUM in
               1) VIDEO="Master_W2_Day1_Mon_NeonTokyo.mp4" ;;
@@ -55,6 +52,9 @@ jobs:
               6) VIDEO="Master_W2_Day6_Sat_CyberZen.mp4" ;;
               7) VIDEO="Master_W2_Day7_Sun_AstralHorizon.mp4" ;;
             esac
+          elif [ "$MODE" = "week2_full_70min" ]; then
+            VIDEO="Master_Week2_Full7Days_70Min.mp4"
+            RELEASE_TAG="v2.0"
           else
             RELEASE_TAG="v1.0"
             case $DAY_NUM in
@@ -69,11 +69,11 @@ jobs:
           fi
 
           echo "SELECTED_VIDEO=$VIDEO" >> $GITHUB_ENV
-          echo "[+] Fetching $VIDEO from release $RELEASE_TAG..."
+          echo "[+] Downloading $VIDEO from Release $RELEASE_TAG..."
           wget -q --show-progress "https://${DOMAIN}/${REPO}/releases/download/${RELEASE_TAG}/${VIDEO}"
 
           if [ ! -f "$VIDEO" ]; then
-            echo "[-] Failed to download $VIDEO! Falling back to v1.0 release asset..."
+            echo "[-] Warning: Failed to download $VIDEO from $RELEASE_TAG. Falling back to v1.0 asset..."
             wget -q --show-progress "https://${DOMAIN}/${REPO}/releases/download/v1.0/CyberMoksha_Day2_Tuesday_CozyCabin_Master_10Min.mp4" -O "$VIDEO"
           fi
 
@@ -86,7 +86,7 @@ jobs:
             exit 1
           fi
 
-          echo "[+] Broadcasting to YouTube Live 24/7..."
+          echo "[+] Broadcasting $SELECTED_VIDEO to YouTube Live 24/7..."
           HOST="a.rtmp.youtube.com"
           ffmpeg -fflags +genpts -re -stream_loop -1 -i "$SELECTED_VIDEO" \
             -c:v copy -c:a aac -b:a 192k -ar 44100 -ac 2 \
