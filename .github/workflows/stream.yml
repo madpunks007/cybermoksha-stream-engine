@@ -21,7 +21,9 @@ jobs:
           sudo apt update -y
           sudo apt install -y ffmpeg
 
-      - name: Select Daily Master Video
+      - - name: Select Daily Master Video
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           DAY_NUM=$(date +%u)
           echo "[+] Today is Day of Week: $DAY_NUM"
@@ -37,9 +39,8 @@ jobs:
           esac
 
           echo "SELECTED_VIDEO=$VIDEO" >> $GITHUB_ENV
-          DOMAIN="github.com"
-          REPO="madpunks007/cybermoksha-stream-engine"
-          curl -L -f --retry 3 -o "${VIDEO}" "https://${DOMAIN}/${REPO}/releases/download/v1.0/${VIDEO}"
+          gh release download v1.0 --repo "madpunks007/cybermoksha-stream-engine" --pattern "${VIDEO}"
+          ls -lh "${VIDEO}"
 
       - name: Broadcast to YouTube Live
         env:
