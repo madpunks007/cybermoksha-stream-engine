@@ -33,7 +33,7 @@ jobs:
           case $DAY_NUM in
             1) VIDEO="CyberMoksha_SacredTemple_Devotional_Master_10Min.mp4" ;;
             2) VIDEO="CyberMoksha_Day2_Tuesday_CozyCabin_Master_10Min.mp4" ;;
-            3) VIDEO="CyberMoksha_Day3_Wednesday_Varanasi_Master_10Min.mp4" ;;
+            3) VIDEO="CyberMoksha_SacredTemple_Devotional_Master_10Min.mp4" ;;
             4) VIDEO="CyberMoksha_Day4_Thursday_RainyLoft_Master_10Min.mp4" ;;
             5) VIDEO="CyberMoksha_Day5_Friday_Himalayan_Master_10Min.mp4" ;;
             6) VIDEO="CyberMoksha_Day6_Saturday_AutumnLibrary_Master_10Min.mp4" ;;
