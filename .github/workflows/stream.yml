@@ -188,7 +188,7 @@ jobs:
           ) &
           DISPATCH_PID=$!
 
-          FILTER_COMPLEX="[0:v]fps=30,split=2[v1][v2];[v1]scale=1920:1080,format=yuv420p[out_16x9];[v2]split=2[bg_src][fg_src];[bg_src]scale=270:480:flags=fast_bilinear,boxblur=4:2,eq=brightness=-0.18,scale=1080:1920:flags=bilinear[bg];[fg_src]scale=1080:-1:flags=fast_bilinear[fg];[bg][fg]overlay=(W-w)/2:470,drawtext=fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf:text='24/7 SYNTHWAVE RADIO':fontcolor=white:fontsize=54:x=(w-text_w)/2:y=190:shadowcolor=black@0.85:shadowx=2:shadowy=2,drawtext=fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf:text='Full Widescreen & Study Mixes on Channel':fontcolor=#cbd5e1:fontsize=30:x=(w-text_w)/2:y=268:shadowcolor=black@0.85:shadowx=2:shadowy=2,format=yuv420p[out_9x16]"
+          FILTER_COMPLEX="[0:v]fps=30,split=2[v1][v2];[v1]scale=1920:1080,format=yuv420p[out_16x9];[v2]split=2[bg_src][fg_src];[bg_src]scale=270:480:force_original_aspect_ratio=increase,crop=270:480,boxblur=4:2,eq=brightness=-0.18,scale=1080:1920:flags=bilinear[bg];[fg_src]scale=1080:-1:flags=fast_bilinear[fg];[bg][fg]overlay=(W-w)/2:(H-h)/2,drawtext=fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf:text='24/7 SYNTHWAVE RADIO':fontcolor=white:fontsize=54:x=(w-text_w)/2:y=190:shadowcolor=black@0.85:shadowx=2:shadowy=2,drawtext=fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf:text='Full Widescreen & Study Mixes on Channel':fontcolor=#cbd5e1:fontsize=30:x=(w-text_w)/2:y=268:shadowcolor=black@0.85:shadowx=2:shadowy=2,format=yuv420p[out_9x16]"
 
           RAPID_FAILS=0
           USE_DUAL=true
