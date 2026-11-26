@@ -1,9 +1,5 @@
 name: 24/7 CYBERMOKSHA Live Stream Engine
 
-concurrency:
-  group: cybermoksha-single-stream
-  cancel-in-progress: false
-
 on:
   workflow_dispatch:
     inputs:
@@ -17,65 +13,113 @@ on:
           - 'week2_full_70min'
           - 'week1_daily'
   schedule:
-    # Autonomous Watchdog: Runs every 30 minutes. If no stream runner is active, revives broadcast immediately!
-    - cron: '*/30 * * * *'
+    # Autonomous YouTube-aware Watchdog: runs every 15 minutes independently of the stream concurrency lock
+    - cron: '*/15 * * * *'
 
 jobs:
+  watchdog:
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Verify GitHub Runner & Live YouTube Broadcast Health
+        env:
+          GH_PAT: ${{ secrets.GH_PAT }}
+        run: |
+          python3 - << 'EOF'
+          import urllib.request, json, os, time
+          from datetime import datetime, timezone
+
+          pat = os.environ.get('GH_PAT', '')
+          gh_headers = {
+              'Authorization': f'Bearer {pat}',
+              'Accept': 'application/vnd.github+json',
+              'User-Agent': 'CyberMoksha-Watchdog'
+          }
+          repo = 'madpunks007/cybermoksha-stream-engine'
+          current_run_id = int(os.environ.get('GITHUB_RUN_ID', '0'))
+
+          def gh_api(path, method='GET', body=None):
+              url = f'https://api.github.com/repos/{repo}/{path}'
+              data = json.dumps(body).encode() if body is not None else None
+              req = urllib.request.Request(url, data=data, headers=gh_headers, method=method)
+              with urllib.request.urlopen(req, timeout=15) as r:
+                  raw = r.read().decode()
+                  return json.loads(raw) if raw else {}
+
+          # 1. Inspect active/queued workflow runs excluding this watchdog run
+          active = []
+          for st in ('in_progress', 'queued', 'pending'):
+              res = gh_api(f'actions/workflows/stream.yml/runs?status={st}&per_page=10')
+              for r in res.get('workflow_runs', []):
+                  if r['id'] != current_run_id and r.get('event') != 'schedule':
+                      active.append(r)
+
+          # 2. Check live status directly on YouTube Channel /live
+          is_yt_live = False
+          yt_vid = None
+          try:
+              yt_req = urllib.request.Request(
+                  'https://www.youtube.com/channel/UCN9dBYToqkaQEP5MihFRG_Q/live',
+                  headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+              )
+              html = urllib.request.urlopen(yt_req, timeout=15).read().decode('utf-8', 'ignore')
+              is_yt_live = '"isLive":true' in html or '"isLiveNow":true' in html
+              idx = html.find('"videoId":"')
+              if idx != -1:
+                  yt_vid = html[idx+11:idx+22]
+          except Exception as e:
+              print(f'[!] YouTube HTTP probe error: {e}')
+              is_yt_live = True  # avoid false-positive cancel if YouTube probe temporarily hiccups
+
+          print(f'[*] Active stream runs: {[r["id"] for r in active]} | YouTube isLive={is_yt_live} (vid={yt_vid})')
+
+          now = datetime.now(timezone.utc)
+          if not active:
+              print('[!] No active stream runner found! Dispatching new stream runner immediately...')
+              gh_api('actions/workflows/stream.yml/dispatches', method='POST', body={'ref': 'main', 'inputs': {'stream_mode': 'week2_daily'}})
+          else:
+              # Check if all active runners are >5 min old yet YouTube reports OFFLINE (e.g. 12hr cutoff or stalled stream)
+              oldest_age_sec = max(
+                  (now - datetime.fromisoformat(r['created_at'].replace('Z', '+00:00'))).total_seconds()
+                  for r in active
+              )
+              print(f'[*] Oldest active runner age: {oldest_age_sec:.0f}s')
+              if oldest_age_sec > 300 and not is_yt_live:
+                  print('[!] Runner active >5m but YouTube reports OFFLINE (likely 12h split or RTMP stall)! Auto-recovering...')
+                  for r in active:
+                      try:
+                          gh_api(f'actions/runs/{r["id"]}/cancel', method='POST')
+                          print(f'  [-] Cancelled stuck run {r["id"]}')
+                      except Exception as ce:
+                          print(f'  [!] Cancel {r["id"]} error: {ce}')
+                  time.sleep(5)
+                  gh_api('actions/workflows/stream.yml/dispatches', method='POST', body={'ref': 'main', 'inputs': {'stream_mode': 'week2_daily'}})
+                  print('[+] Auto-recovery dispatched fresh stream runner!')
+              else:
+                  print('[+] Stream healthy! Watchdog exiting cleanly.')
+          EOF
+
   stream:
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     timeout-minutes: 355
+    concurrency:
+      group: cybermoksha-single-stream
+      cancel-in-progress: false
 
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Cron Watchdog Guard (Prevent Duplicate Active Streams)
-        if: github.event_name == 'schedule'
-        env:
-          GH_PAT: ${{ secrets.GH_PAT || secrets.GITHUB_TOKEN }}
-        run: |
-          echo "[*] Scheduled watchdog wake-up. Verifying if a live stream runner is currently active..."
-          python3 - << 'EOF'
-          import urllib.request, json, os, sys
-
-          pat = os.environ.get('GH_PAT')
-          headers = {
-              'Accept': 'application/vnd.github+json',
-              'User-Agent': 'CyberMoksha-Watchdog'
-          }
-          if pat:
-              headers['Authorization'] = f'Bearer {pat}'
-
-          current_run_id = int(os.environ.get('GITHUB_RUN_ID', '0'))
-          url = 'https://api.github.com/repos/madpunks007/cybermoksha-stream-engine/actions/workflows/stream.yml/runs?status=in_progress'
-
-          try:
-              req = urllib.request.Request(url, headers=headers)
-              with urllib.request.urlopen(req) as resp:
-                  data = json.loads(resp.read().decode())
-                  other_runs = [r['id'] for r in data.get('workflow_runs', []) if r['id'] != current_run_id]
-                  if other_runs:
-                      print(f"[+] Active streaming runner is already running: {other_runs}. Watchdog exiting cleanly.")
-                      sys.exit(99)
-                  else:
-                      print("[!] No active streaming runner found! Watchdog reviving stream broadcast immediately!")
-          except Exception as e:
-              print(f"[-] Watchdog check notice: {e}. Proceeding with stream broadcast.")
-          EOF
-          if [ $? -eq 99 ]; then
-            echo "SKIP_STREAM=true" >> $GITHUB_ENV
-          fi
-
       - name: Verify FFmpeg
-        if: env.SKIP_STREAM != 'true'
         run: |
           if ! command -v ffmpeg &> /dev/null; then
             sudo apt-get update -y && sudo apt-get install -y ffmpeg
           fi
           ffmpeg -version | head -n 1
 
-      - name: Select Daily Master Video (Week 2 Autonomous)
-        if: env.SKIP_STREAM != 'true'
+      - name: Select Daily Master Video (Autonomous Day-of-Week)
         run: |
           MODE="${{ github.event.inputs.stream_mode || 'week2_daily' }}"
           DAY_NUM=$(date +%u)
@@ -123,7 +167,6 @@ jobs:
           ls -lh "$VIDEO"
 
       - name: Broadcast to YouTube Live (Resilient Auto-Reconnect Loop)
-        if: env.SKIP_STREAM != 'true'
         env:
           YOUTUBE_STREAM_KEY: ${{ secrets.YOUTUBE_STREAM_KEY }}
           GH_PAT: ${{ secrets.GH_PAT }}
@@ -140,7 +183,7 @@ jobs:
 
           echo "[+] Starting 24/7 stream broadcast. Target duration: ${TOTAL_DURATION}s (~5h 45m)"
 
-          # Pre-dispatch next runner 60 seconds before this runner completes for zero downtime
+          # Pre-dispatch next runner 60 seconds before this runner completes (queued safely via job concurrency)
           (
             SLEEP_SECS=$((TOTAL_DURATION - 60))
             if [ $SLEEP_SECS -gt 0 ]; then
@@ -182,7 +225,7 @@ jobs:
           wait $DISPATCH_PID 2>/dev/null || true
 
       - name: Fail-Safe Auto-Restart Relay (Self-Chaining)
-        if: always() && !cancelled() && env.SKIP_STREAM != 'true'
+        if: always() && !cancelled()
         env:
           GH_PAT: ${{ secrets.GH_PAT }}
         run: |
