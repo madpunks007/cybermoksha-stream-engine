@@ -1,4 +1,4 @@
-name: 24/7 CYBERMOKSHA Live Stream Engine
+name: 24/7 CYBERMOKSHA Dual-Stream Engine (16:9 + 9:16 Shorts Live)
 
 on:
   workflow_dispatch:
@@ -6,14 +6,14 @@ on:
       stream_mode:
         description: 'Broadcast Mode'
         required: true
-        default: 'week2_daily'
+        default: 'v3_dual'
         type: choice
         options:
+          - 'v3_dual'
           - 'week2_daily'
-          - 'week2_full_70min'
           - 'week1_daily'
   schedule:
-    # Autonomous YouTube-aware Watchdog: runs every 15 minutes independently of the stream concurrency lock
+    # Autonomous Watchdog: runs every 15 minutes independently of the stream concurrency lock
     - cron: '*/15 * * * *'
 
 jobs:
@@ -47,7 +47,6 @@ jobs:
                   raw = r.read().decode()
                   return json.loads(raw) if raw else {}
 
-          # 1. Inspect active/queued workflow runs excluding this watchdog run
           active = []
           for st in ('in_progress', 'queued', 'pending'):
               res = gh_api(f'actions/workflows/stream.yml/runs?status={st}&per_page=10')
@@ -55,7 +54,6 @@ jobs:
                   if r['id'] != current_run_id and r.get('event') != 'schedule':
                       active.append(r)
 
-          # 2. Check live status directly on YouTube Channel /live
           is_yt_live = False
           yt_vid = None
           try:
@@ -70,32 +68,28 @@ jobs:
                   yt_vid = html[idx+11:idx+22]
           except Exception as e:
               print(f'[!] YouTube HTTP probe error: {e}')
-              is_yt_live = True  # avoid false-positive cancel if YouTube probe temporarily hiccups
+              is_yt_live = True
 
           print(f'[*] Active stream runs: {[r["id"] for r in active]} | YouTube isLive={is_yt_live} (vid={yt_vid})')
 
           now = datetime.now(timezone.utc)
           if not active:
-              print('[!] No active stream runner found! Dispatching new stream runner immediately...')
-              gh_api('actions/workflows/stream.yml/dispatches', method='POST', body={'ref': 'main', 'inputs': {'stream_mode': 'week2_daily'}})
+              print('[!] No active stream runner found! Dispatching new dual-stream runner immediately...')
+              gh_api('actions/workflows/stream.yml/dispatches', method='POST', body={'ref': 'main', 'inputs': {'stream_mode': 'v3_dual'}})
           else:
-              # Check if all active runners are >5 min old yet YouTube reports OFFLINE (e.g. 12hr cutoff or stalled stream)
               oldest_age_sec = max(
                   (now - datetime.fromisoformat(r['created_at'].replace('Z', '+00:00'))).total_seconds()
                   for r in active
               )
-              print(f'[*] Oldest active runner age: {oldest_age_sec:.0f}s')
               if oldest_age_sec > 300 and not is_yt_live:
-                  print('[!] Runner active >5m but YouTube reports OFFLINE (likely 12h split or RTMP stall)! Auto-recovering...')
+                  print('[!] Runner active >5m but YouTube reports OFFLINE (likely 12h split or stall)! Auto-recovering...')
                   for r in active:
                       try:
                           gh_api(f'actions/runs/{r["id"]}/cancel', method='POST')
-                          print(f'  [-] Cancelled stuck run {r["id"]}')
-                      except Exception as ce:
-                          print(f'  [!] Cancel {r["id"]} error: {ce}')
+                      except Exception:
+                          pass
                   time.sleep(5)
-                  gh_api('actions/workflows/stream.yml/dispatches', method='POST', body={'ref': 'main', 'inputs': {'stream_mode': 'week2_daily'}})
-                  print('[+] Auto-recovery dispatched fresh stream runner!')
+                  gh_api('actions/workflows/stream.yml/dispatches', method='POST', body={'ref': 'main', 'inputs': {'stream_mode': 'v3_dual'}})
               else:
                   print('[+] Stream healthy! Watchdog exiting cleanly.')
           EOF
@@ -112,24 +106,32 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Verify FFmpeg
+      - name: Verify FFmpeg & Fonts
         run: |
-          if ! command -v ffmpeg &> /dev/null; then
-            sudo apt-get update -y && sudo apt-get install -y ffmpeg
+          if ! command -v ffmpeg &> /dev/null || [ ! -f /usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf ]; then
+            sudo apt-get update -y && sudo apt-get install -y ffmpeg fonts-dejavu-core
           fi
           ffmpeg -version | head -n 1
 
-      - name: Select Daily Master Video (Autonomous Day-of-Week)
+      - name: Select Daily Smooth Master Video (v3.0 Upgraded Audio)
         run: |
-          MODE="${{ github.event.inputs.stream_mode || 'week2_daily' }}"
+          MODE="${{ github.event.inputs.stream_mode || 'v3_dual' }}"
           DAY_NUM=$(date +%u)
-          echo "[+] Selected Stream Mode: $MODE"
-          echo "[+] Today is Day of Week: $DAY_NUM (1=Mon, 2=Tue, 3=Wed, 4=Thu, 5=Fri, 6=Sat, 7=Sun)"
-
           DOMAIN="github.com"
           REPO="madpunks007/cybermoksha-stream-engine"
 
-          if [ "$MODE" = "week2_daily" ]; then
+          if [ "$MODE" = "v3_dual" ]; then
+            RELEASE_TAG="v3.0"
+            case $DAY_NUM in
+              1) VIDEO="Master_W3_Day1_Mon_NeonTokyo.mp4" ;;
+              2) VIDEO="Master_W3_Day2_Tue_DeepSpace.mp4" ;;
+              3) VIDEO="Master_W3_Day3_Wed_SynthCity.mp4" ;;
+              4) VIDEO="Master_W3_Day4_Thu_CozyRoom.mp4" ;;
+              5) VIDEO="Master_W3_Day5_Fri_UnderwaterDome.mp4" ;;
+              6) VIDEO="Master_W3_Day6_Sat_CyberZen.mp4" ;;
+              7) VIDEO="Master_W3_Day7_Sun_AstralSunset.mp4" ;;
+            esac
+          elif [ "$MODE" = "week2_daily" ]; then
             RELEASE_TAG="v2.0"
             case $DAY_NUM in
               1) VIDEO="Master_W2_Day1_Mon_NeonTokyo.mp4" ;;
@@ -140,9 +142,6 @@ jobs:
               6) VIDEO="Master_W2_Day6_Sat_CyberZen.mp4" ;;
               7) VIDEO="Master_W2_Day7_Sun_AstralHorizon.mp4" ;;
             esac
-          elif [ "$MODE" = "week2_full_70min" ]; then
-            VIDEO="Master_Week2_Full7Days_70Min.mp4"
-            RELEASE_TAG="v2.0"
           else
             RELEASE_TAG="v1.0"
             case $DAY_NUM in
@@ -157,18 +156,13 @@ jobs:
           fi
 
           echo "SELECTED_VIDEO=$VIDEO" >> $GITHUB_ENV
-          echo "[+] Downloading $VIDEO from Release $RELEASE_TAG..."
-          wget -q --show-progress "https://${DOMAIN}/${REPO}/releases/download/${RELEASE_TAG}/${VIDEO}"
-
-          if [ ! -f "$VIDEO" ] || [ ! -s "$VIDEO" ]; then
-            echo "[-] Fallback: Downloading via GitHub CLI..."
-            gh release download "$RELEASE_TAG" --repo "$REPO" --pattern "$VIDEO" || true
-          fi
+          wget -q --show-progress "https://${DOMAIN}/${REPO}/releases/download/${RELEASE_TAG}/${VIDEO}" || gh release download "$RELEASE_TAG" --repo "$REPO" --pattern "$VIDEO"
           ls -lh "$VIDEO"
 
-      - name: Broadcast to YouTube Live (Resilient Auto-Reconnect Loop)
+      - name: Broadcast Dual 16:9 + 9:16 Vertical Shorts Live
         env:
           YOUTUBE_STREAM_KEY: ${{ secrets.YOUTUBE_STREAM_KEY }}
+          YOUTUBE_VERTICAL_STREAM_KEY: ${{ secrets.YOUTUBE_VERTICAL_STREAM_KEY }}
           GH_PAT: ${{ secrets.GH_PAT }}
         run: |
           if [ -z "$YOUTUBE_STREAM_KEY" ]; then
@@ -176,48 +170,68 @@ jobs:
             exit 1
           fi
 
-          TOTAL_DURATION=20700   # 5 hours 45 minutes
+          TOTAL_DURATION=20700   # 5 hours 45 minutes (<6h for clean VOD archival!)
           START_TIME=$(date +%s)
           TARGET_END=$((START_TIME + TOTAL_DURATION))
           HOST="a.rtmp.youtube.com"
 
-          echo "[+] Starting 24/7 stream broadcast. Target duration: ${TOTAL_DURATION}s (~5h 45m)"
-
-          # Pre-dispatch next runner 60 seconds before this runner completes (queued safely via job concurrency)
           (
             SLEEP_SECS=$((TOTAL_DURATION - 60))
             if [ $SLEEP_SECS -gt 0 ]; then
               sleep $SLEEP_SECS
-              echo "[+] Handover: 60s remaining. Pre-dispatching next runner..."
               curl -s -f -X POST \
                 -H "Accept: application/vnd.github+json" \
                 -H "Authorization: Bearer ${GH_PAT}" \
                 "https://api.github.com/repos/madpunks007/cybermoksha-stream-engine/actions/workflows/stream.yml/dispatches" \
-                -d '{"ref":"main"}' && touch /tmp/early_dispatched || echo "[!] Pre-dispatch attempt completed."
+                -d '{"ref":"main"}' && touch /tmp/early_dispatched || true
             fi
           ) &
           DISPATCH_PID=$!
 
-          # Resilient loop: If YouTube RTMP resets, network drops, or broken pipe occurs, reconnect immediately!
+          FILTER_COMPLEX="[0:v]fps=30,split=2[v1][v2];[v1]scale=1920:1080,format=yuv420p[out_16x9];[v2]split=2[bg_src][fg_src];[bg_src]scale=270:480:flags=fast_bilinear,boxblur=4:2,eq=brightness=-0.18,scale=1080:1920:flags=bilinear[bg];[fg_src]scale=1080:-1:flags=fast_bilinear[fg];[bg][fg]overlay=(W-w)/2:470,drawtext=fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf:text='24/7 SYNTHWAVE RADIO':fontcolor=white:fontsize=54:x=(w-text_w)/2:y=190:shadowcolor=black@0.85:shadowx=2:shadowy=2,drawtext=fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf:text='Full Widescreen & Study Mixes on Channel':fontcolor=#cbd5e1:fontsize=30:x=(w-text_w)/2:y=268:shadowcolor=black@0.85:shadowx=2:shadowy=2,format=yuv420p[out_9x16]"
+
+          RAPID_FAILS=0
+          USE_DUAL=true
+          if [ -z "$YOUTUBE_VERTICAL_STREAM_KEY" ]; then
+            echo "[!] YOUTUBE_VERTICAL_STREAM_KEY not set — streaming 16:9 solo."
+            USE_DUAL=false
+          fi
+
           while true; do
             NOW=$(date +%s)
             REMAINING=$((TARGET_END - NOW))
-
             if [ $REMAINING -le 15 ]; then
-              echo "[+] Target stream duration reached ($REMAINING seconds remaining). Gracefully handing over."
+              echo "[+] Target stream cycle reached ($REMAINING seconds left). Handing over."
               break
             fi
 
-            echo "[*] [$(date '+%Y-%m-%d %H:%M:%S')] Broadcasting to YouTube Live ($REMAINING seconds left in cycle)..."
-            ffmpeg -loglevel warning -fflags +genpts -re -stream_loop -1 -i "$SELECTED_VIDEO" \
-              -c:v copy -c:a aac -b:a 192k -ar 44100 -ac 2 \
-              -t "$REMAINING" \
-              -flvflags no_duration_filesize -f flv "rtmp://${HOST}/live2/${YOUTUBE_STREAM_KEY}" || true
+            ITER_START=$(date +%s)
+            if [ "$USE_DUAL" = true ]; then
+              echo "[*] Dual-Stream Live (16:9 + 9:16 Shorts) | ${REMAINING}s remaining..."
+              ffmpeg -loglevel warning -fflags +genpts -re -stream_loop -1 -i "$SELECTED_VIDEO" \
+                -threads 0 -filter_complex "$FILTER_COMPLEX" \
+                -map "[out_16x9]" -map 0:a -t "$REMAINING" -c:v libx264 -preset superfast -b:v 4500k -maxrate 4500k -bufsize 9000k -pix_fmt yuv420p -g 60 -c:a aac -b:a 128k -ar 44100 -flvflags no_duration_filesize -f flv "rtmp://${HOST}/live2/${YOUTUBE_STREAM_KEY}" \
+                -map "[out_9x16]" -map 0:a -t "$REMAINING" -c:v libx264 -preset superfast -b:v 3000k -maxrate 3000k -bufsize 6000k -pix_fmt yuv420p -g 60 -c:a aac -b:a 128k -ar 44100 -flvflags no_duration_filesize -f flv "rtmp://${HOST}/live2/${YOUTUBE_VERTICAL_STREAM_KEY}" || true
+            else
+              echo "[*] Single-Stream Live (16:9 Fallback) | ${REMAINING}s remaining..."
+              ffmpeg -loglevel warning -fflags +genpts -re -stream_loop -1 -i "$SELECTED_VIDEO" \
+                -t "$REMAINING" -c:v copy -c:a aac -b:a 128k -ar 44100 -flvflags no_duration_filesize -f flv "rtmp://${HOST}/live2/${YOUTUBE_STREAM_KEY}" || true
+            fi
 
+            ITER_DUR=$(( $(date +%s) - ITER_START ))
             NOW=$(date +%s)
             REMAINING=$((TARGET_END - NOW))
             if [ $REMAINING -gt 15 ]; then
-              echo "[!] Connection dropped (YouTube RTMP reset or packet timeout). Auto-reconnecting in 2 seconds..."
+              if [ $ITER_DUR -lt 10 ] && [ "$USE_DUAL" = true ]; then
+                RAPID_FAILS=$((RAPID_FAILS + 1))
+                echo "[!] Rapid disconnect ($ITER_DUR s, fail #$RAPID_FAILS)."
+                if [ $RAPID_FAILS -ge 3 ]; then
+                  echo "[!] Vertical RTMP hiccup detected 3x in a row — falling back to 16:9 solo so main stream stays protected!"
+                  USE_DUAL=false
+                fi
+              else
+                RAPID_FAILS=0
+              fi
               sleep 2
             fi
           done
@@ -229,10 +243,7 @@ jobs:
         env:
           GH_PAT: ${{ secrets.GH_PAT }}
         run: |
-          if [ -f /tmp/early_dispatched ]; then
-            echo "[+] Next relay runner was already pre-dispatched successfully."
-          else
-            echo "[+] Triggering next 24/7 stream relay runner via GitHub Actions REST API..."
+          if [ ! -f /tmp/early_dispatched ]; then
             curl -s -X POST \
               -H "Accept: application/vnd.github+json" \
               -H "Authorization: Bearer ${GH_PAT}" \
